@@ -1,0 +1,32 @@
+[
+  {
+    "node": "intake",
+    "message": "Validated 1 source files; dispatching 3 specialists.",
+    "timestamp": "2026-11-09T06:13:07.159163+00:00",
+    "elapsed_seconds": 0.0
+  },
+  {
+    "node": "security",
+    "message": "completed: 0 validated findings.",
+    "timestamp": "2026-11-09T06:13:11.207208+00:00",
+    "elapsed_seconds": 4.04
+  },
+  {
+    "node": "tests",
+    "message": "completed: 4 validated findings.",
+    "timestamp": "2026-11-09T06:13:22.155630+00:00",
+    "elapsed_seconds": 14.98
+  },
+  {
+    "node": "bugs",
+    "message": "completed: 3 validated findings.",
+    "timestamp": "2026-11-09T06:13:23.773256+00:00",
+    "elapsed_seconds": 16.61
+  },
+  {
+    "node": "orchestrator",
+    "message": "Ranked 7 findings; waiting for a human decision.",
+    "timestamp": "2026-11-09T06:13:27.839171+00:00",
+    "elapsed_seconds": 0.0
+  }
+]

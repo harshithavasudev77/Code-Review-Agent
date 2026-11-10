@@ -1,0 +1,325 @@
+{
+  "run_id": "bceaba86-b0fa-4ebb-99a9-60b42527ad95",
+  "title": "Starlette authentication",
+  "created_at": "2026-11-09T06:13:27.838954+00:00",
+  "model": "nvidia/Nemotron-3_5-Lightning",
+  "provider": "Nebius Token Factory",
+  "origin": "https://github.com/encode/starlette @ 0.41.3",
+  "file_manifest": [
+    {
+      "path": "starlette/authentication.py",
+      "lines": 147,
+      "sha256": "f5d9727b2903321a3182623d845559dfcbaef0d97a93635989aa1aeb4ed9f217"
+    }
+  ],
+  "findings": [
+    {
+      "title": "requires decorator does not validate that auth exists before accessing conn.auth.scopes",
+      "severity": "high",
+      "file": "starlette/authentication.py",
+      "line_start": 30,
+      "line_end": 96,
+      "evidence": "def requires(\n    scopes: str | typing.Sequence[str],\n    status_code: int = 403,\n    redirect: str | None = None,\n) -> typing.Callable[[typing.Callable[_P, typing.Any]], typing.Callable[_P, typing.Any]]:\n    scopes_list = [scopes] if isinstance(scopes, str) else list(scopes)\n\n    def decorator(\n        func: typing.Callable[_P, typing.Any],\n    ) -> typing.Callable[_P, typing.Any]:\n        sig = inspect.signature(func)\n        for idx, parameter in enumerate(sig.parameters.values()):\n            if parameter.name == \"request\" or parameter.name == \"websocket\":\n                type_ = parameter.name\n                break\n        else:\n            raise Exception(f'No \"request\" or \"websocket\" argument on function \"{func}\"')\n\n        if type_ == \"websocket\":\n            # Handle websocket functions. (Always async)\n            @functools.wraps(func)\n            async def websocket_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n                websocket = kwargs.get(\"websocket\", args[idx] if idx < len(args) else None)\n                assert isinstance(websocket, WebSocket)\n\n                if not has_required_scope(websocket, scopes_list):\n                    await websocket.clos",
+      "explanation": "The wrapper functions (async_wrapper, sync_wrapper) assume request.auth is always present and has a scopes attribute. If a request reaches the wrapper without auth being initialized, an unhandled AttributeError propagates to the user, potentially leaking stack traces or causing 500 errors instead of a clean authentication failure.",
+      "recommendation": "Add a guard at the top of async_wrapper and sync_wrapper to check hasattr(request, 'auth') and that request.auth is not None before checking scopes. If auth is missing, treat as unauthorized (raise HTTPException or redirect as configured).",
+      "suggested_test": "Create a request mock without auth and verify requires([]) raises HTTPException(403) rather than AttributeError.",
+      "confidence": 0.85,
+      "category": "lifecycle",
+      "id": "CR-001",
+      "agents": [
+        "bugs"
+      ]
+    },
+    {
+      "title": "has_required_scope does not guard against missing auth attribute",
+      "severity": "medium",
+      "file": "starlette/authentication.py",
+      "line_start": 23,
+      "line_end": 27,
+      "evidence": "def has_required_scope(conn: HTTPConnection, scopes: typing.Sequence[str]) -> bool:\n    for scope in scopes:\n        if scope not in conn.auth.scopes:\n            return False\n    return True",
+      "explanation": "The function assumes conn.auth always exists and has a scopes attribute. If a connection arrives without an auth attribute (e.g., early middleware chain or test harness), a AttributeError will propagate. This is a defensive gap for a library used in varied middleware pipelines.",
+      "recommendation": "Add a guard to check hasattr(conn, \"auth\") and that auth has scopes before iterating, returning False (deny access) when auth is absent or malformed.",
+      "suggested_test": "def test_has_required_scope_missing_auth(monkeypatch):\\n    class DummyConn:\\n        pass\\n    result = has_required_scope(DummyConn(), [\"read\"])\\n    assert result is False\\n\\ndef test_has_required_scope_empty_scopes:\\n    class DummyAuth:\\n        scopes = []\\n    class DummyConn:\\n        auth = DummyAuth()\\n    result = has_required_scope(DummyConn(), [\"read\"])\\n    assert result is False",
+      "confidence": 0.9,
+      "category": "defensive programming",
+      "id": "CR-002",
+      "agents": [
+        "tests"
+      ]
+    },
+    {
+      "title": "has_required_scope short-circuits on empty scopes list",
+      "severity": "medium",
+      "file": "starlette/authentication.py",
+      "line_start": 23,
+      "line_end": 27,
+      "evidence": "def has_required_scope(conn: HTTPConnection, scopes: typing.Sequence[str]) -> bool:\n    for scope in scopes:\n        if scope not in conn.auth.scopes:\n            return False\n    return True",
+      "explanation": "When `scopes` is an empty list, the for loop body never executes and the function immediately returns True. This means any connection is treated as having all required scopes when none are specified, which can be an authorization bypass if the caller relies on the function to enforce scope requirements.",
+      "recommendation": "Add an explicit check: if not scopes, return True only when the connection is already authenticated, or document that empty scopes means 'no restriction' and ensure callers handle this case intentionally.",
+      "suggested_test": "Test that has_required_scope(conn, []) returns True for an authenticated conn, and returns False for an unauthenticated conn when the intent is to require at least one scope.",
+      "confidence": 0.9,
+      "category": "logic",
+      "id": "CR-003",
+      "agents": [
+        "bugs"
+      ]
+    },
+    {
+      "title": "async_wrapper and sync_wrapper do not handle request attribute missing from kwargs",
+      "severity": "medium",
+      "file": "starlette/authentication.py",
+      "line_start": 62,
+      "line_end": 94,
+      "evidence": "        elif is_async_callable(func):\n            # Handle async request/response functions.\n            @functools.wraps(func)\n            async def async_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> typing.Any:\n                request = kwargs.get(\"request\", args[idx] if idx < len(args) else None)\n                assert isinstance(request, Request)\n\n                if not has_required_scope(request, scopes_list):\n                    if redirect is not None:\n                        orig_request_qparam = urlencode({\"next\": str(request.url)})\n                        next_url = f\"{request.url_for(redirect)}?{orig_request_qparam}\"\n                        return RedirectResponse(url=next_url, status_code=303)\n                    raise HTTPException(status_code=status_code)\n                return await func(*args, **kwargs)\n\n            return async_wrapper\n\n        else:\n            # Handle sync request/response functions.\n            @functools.wraps(func)\n            def sync_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> typing.Any:\n                request = kwargs.get(\"request\", args[idx] if idx < len(args) else None)\n                assert isinstance(request, Request)\n\n      ",
+      "explanation": "The wrapper retrieves request from kwargs or positional args via idx, but if neither is present, the assert will raise AssertionError rather than a clear HTTPException or redirect. This can crash the server in edge routing scenarios.",
+      "recommendation": "Add a None check after request resolution and fall back to a 403/redirect, or ensure the decorator is only applied to routes that always inject a request.",
+      "suggested_test": "def test_async_wrapper_no_request():\\n    @requires(scopes=[\"read\"])\\n    async def view():\\n        return {\"passed\": True}\\n    # Should not crash; should return 403 or redirect instead of AssertionError",
+      "confidence": 0.88,
+      "category": "error handling",
+      "id": "CR-004",
+      "agents": [
+        "tests"
+      ]
+    },
+    {
+      "title": "requires decorator does not validate scopes type at decorator creation",
+      "severity": "low",
+      "file": "starlette/authentication.py",
+      "line_start": 30,
+      "line_end": 35,
+      "evidence": "def requires(\n    scopes: str | typing.Sequence[str],\n    status_code: int = 403,\n    redirect: str | None = None,\n) -> typing.Callable[[typing.Callable[_P, typing.Any]], typing.Callable[_P, typing.Any]]:\n    scopes_list = [scopes] if isinstance(scopes, str) else list(scopes)",
+      "explanation": "If scopes is an empty list or an empty tuple, scopes_list becomes empty, and has_required_scope will always return True (vacuous truth), effectively bypassing authorization. This is not a security flaw per se but a behavioral surprise when callers pass empty scope collections.",
+      "recommendation": "Add a runtime check that raises ValueError or TypeError when an empty sequence is passed, unless the intent is to allow unrestricted access explicitly documented.",
+      "suggested_test": "def test_requires_empty_scopes_bypasses():\\n    @requires(scopes=[])\\n    async def view(request):\\n        return {\"passed\": True}\\n    # The wrapper should either reject empty scopes or document that empty means allow all",
+      "confidence": 0.85,
+      "category": "input validation",
+      "id": "CR-005",
+      "agents": [
+        "tests"
+      ]
+    },
+    {
+      "title": "AuthCredentials.__init__ mutates the input list when scopes is provided",
+      "severity": "low",
+      "file": "starlette/authentication.py",
+      "line_start": 108,
+      "line_end": 110,
+      "evidence": "class AuthCredentials:\n    def __init__(self, scopes: typing.Sequence[str] | None = None):\n        self.scopes = [] if scopes is None else list(scopes)",
+      "explanation": "While `list(scopes)` creates a shallow copy, the type annotation `typing.Sequence[str] | None` suggests the intent is to accept any sequence. If a caller passes a tuple or other immutable sequence, the code works fine. However, if a mutable list is passed and later code replaces self.scopes, external references to the original list are not affected due to the copy. This is not a bug but worth noting that the copy protection is present.",
+      "recommendation": "No fix needed; the current implementation correctly copies the input. If the intent is to accept any iterable, consider `list(scopes)` is already there.",
+      "suggested_test": "Pass a tuple to AuthCredentials and verify self.scopes is a list independent of the original.",
+      "confidence": 0.6,
+      "category": "anti-pattern",
+      "id": "CR-006",
+      "agents": [
+        "bugs"
+      ]
+    },
+    {
+      "title": "AuthenticationError exception is defined but never raised in the snapshot",
+      "severity": "info",
+      "file": "starlette/authentication.py",
+      "line_start": 99,
+      "line_end": 100,
+      "evidence": "class AuthenticationError(Exception):\n    pass",
+      "explanation": "AuthenticationError is exported but not used anywhere in the visible source. It could be leveraged by custom AuthenticationBackend implementations to signal auth failures explicitly.",
+      "recommendation": "Consider raising AuthenticationError in AuthenticationBackend.authenticate when appropriate, and document its intended use for downstream backends.",
+      "suggested_test": "def test_authentication_error_can_be_raised():\\n    try:\\n        raise AuthenticationError(\"test\")\\n    except AuthenticationError:\\n        pass\\n    else:\\n        assert False, \"Should raise\"",
+      "confidence": 0.6,
+      "category": "unused API",
+      "id": "CR-007",
+      "agents": [
+        "tests"
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "role": "bugs",
+      "status": "completed",
+      "review": {
+        "summary": "Review of starlette/authentication.py focusing on scope-checking and credential lifecycle issues.",
+        "findings": [
+          {
+            "title": "has_required_scope short-circuits on empty scopes list",
+            "severity": "medium",
+            "file": "starlette/authentication.py",
+            "line_start": 23,
+            "line_end": 27,
+            "evidence": "def has_required_scope(conn: HTTPConnection, scopes: typing.Sequence[str]) -> bool:\n    for scope in scopes:\n        if scope not in conn.auth.scopes:\n            return False\n    return True",
+            "explanation": "When `scopes` is an empty list, the for loop body never executes and the function immediately returns True. This means any connection is treated as having all required scopes when none are specified, which can be an authorization bypass if the caller relies on the function to enforce scope requirements.",
+            "recommendation": "Add an explicit check: if not scopes, return True only when the connection is already authenticated, or document that empty scopes means 'no restriction' and ensure callers handle this case intentionally.",
+            "suggested_test": "Test that has_required_scope(conn, []) returns True for an authenticated conn, and returns False for an unauthenticated conn when the intent is to require at least one scope.",
+            "confidence": 0.9,
+            "category": "logic"
+          },
+          {
+            "title": "requires decorator does not validate that auth exists before accessing conn.auth.scopes",
+            "severity": "high",
+            "file": "starlette/authentication.py",
+            "line_start": 30,
+            "line_end": 96,
+            "evidence": "def requires(\n    scopes: str | typing.Sequence[str],\n    status_code: int = 403,\n    redirect: str | None = None,\n) -> typing.Callable[[typing.Callable[_P, typing.Any]], typing.Callable[_P, typing.Any]]:\n    scopes_list = [scopes] if isinstance(scopes, str) else list(scopes)\n\n    def decorator(\n        func: typing.Callable[_P, typing.Any],\n    ) -> typing.Callable[_P, typing.Any]:\n        sig = inspect.signature(func)\n        for idx, parameter in enumerate(sig.parameters.values()):\n            if parameter.name == \"request\" or parameter.name == \"websocket\":\n                type_ = parameter.name\n                break\n        else:\n            raise Exception(f'No \"request\" or \"websocket\" argument on function \"{func}\"')\n\n        if type_ == \"websocket\":\n            # Handle websocket functions. (Always async)\n            @functools.wraps(func)\n            async def websocket_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n                websocket = kwargs.get(\"websocket\", args[idx] if idx < len(args) else None)\n                assert isinstance(websocket, WebSocket)\n\n                if not has_required_scope(websocket, scopes_list):\n                    await websocket.clos",
+            "explanation": "The wrapper functions (async_wrapper, sync_wrapper) assume request.auth is always present and has a scopes attribute. If a request reaches the wrapper without auth being initialized, an unhandled AttributeError propagates to the user, potentially leaking stack traces or causing 500 errors instead of a clean authentication failure.",
+            "recommendation": "Add a guard at the top of async_wrapper and sync_wrapper to check hasattr(request, 'auth') and that request.auth is not None before checking scopes. If auth is missing, treat as unauthorized (raise HTTPException or redirect as configured).",
+            "suggested_test": "Create a request mock without auth and verify requires([]) raises HTTPException(403) rather than AttributeError.",
+            "confidence": 0.85,
+            "category": "lifecycle"
+          },
+          {
+            "title": "AuthCredentials.__init__ mutates the input list when scopes is provided",
+            "severity": "low",
+            "file": "starlette/authentication.py",
+            "line_start": 108,
+            "line_end": 110,
+            "evidence": "class AuthCredentials:\n    def __init__(self, scopes: typing.Sequence[str] | None = None):\n        self.scopes = [] if scopes is None else list(scopes)",
+            "explanation": "While `list(scopes)` creates a shallow copy, the type annotation `typing.Sequence[str] | None` suggests the intent is to accept any sequence. If a caller passes a tuple or other immutable sequence, the code works fine. However, if a mutable list is passed and later code replaces self.scopes, external references to the original list are not affected due to the copy. This is not a bug but worth noting that the copy protection is present.",
+            "recommendation": "No fix needed; the current implementation correctly copies the input. If the intent is to accept any iterable, consider `list(scopes)` is already there.",
+            "suggested_test": "Pass a tuple to AuthCredentials and verify self.scopes is a list independent of the original.",
+            "confidence": 0.6,
+            "category": "anti-pattern"
+          }
+        ],
+        "limitations": [
+          "The review is based on a static snapshot of starlette/authentication.py only; runtime behavior, middleware ordering, and upstream test suites are outside scope.",
+          "No execution of the code was performed; findings are based on code inspection alone.",
+          "The `has_required_scope` empty-scopes behavior may be intentional depending on framework design; severity assessment assumes typical authorization expectations."
+        ]
+      },
+      "error": "",
+      "tool_calls": [
+        "inspect_sources",
+        "read_lines",
+        "search_sources"
+      ],
+      "llm_calls": 4,
+      "input_tokens": 13894,
+      "output_tokens": 1021,
+      "elapsed_seconds": 16.61
+    },
+    {
+      "role": "security",
+      "status": "completed",
+      "review": {
+        "summary": "Review of starlette/authentication.py - authentication and authorization primitives. No dangerous sinks (e.g., exec, eval, os operations, unsafe deserialization, path traversal, secret exposure) are present in this file. The code provides scope-based access control via `has_required_scope` and `requires` decorator. Input from the connection's auth scopes is compared against required scopes; missing scopes trigger a 403 or redirect. The `UnauthenticatedUser` returns `is_authenticated=False`. No user-controllable data flows into dangerous operations. The file is a library module defining authentication building blocks; exploitation requires upstream code that passes untrusted data into sinks not present here.",
+        "findings": [],
+        "limitations": [
+          "Only the submitted snapshot is reviewed; upstream application code, tests, and middleware are outside scope.",
+          "No runtime execution or test results are available; findings are based solely on static code analysis of the provided file."
+        ]
+      },
+      "error": "",
+      "tool_calls": [
+        "inspect_sources"
+      ],
+      "llm_calls": 2,
+      "input_tokens": 5433,
+      "output_tokens": 214,
+      "elapsed_seconds": 4.04
+    },
+    {
+      "role": "tests",
+      "status": "completed",
+      "review": {
+        "summary": "Review of starlette/authentication.py snapshot: authentication primitives and authorization decorators. No test files were submitted in this snapshot. Coverage was not measured. Below are findings focused on missing assertions, edge-case handling, and testable behaviors directly tied to the supplied source.",
+        "findings": [
+          {
+            "title": "has_required_scope does not guard against missing auth attribute",
+            "severity": "medium",
+            "file": "starlette/authentication.py",
+            "line_start": 23,
+            "line_end": 27,
+            "evidence": "def has_required_scope(conn: HTTPConnection, scopes: typing.Sequence[str]) -> bool:\n    for scope in scopes:\n        if scope not in conn.auth.scopes:\n            return False\n    return True",
+            "explanation": "The function assumes conn.auth always exists and has a scopes attribute. If a connection arrives without an auth attribute (e.g., early middleware chain or test harness), a AttributeError will propagate. This is a defensive gap for a library used in varied middleware pipelines.",
+            "recommendation": "Add a guard to check hasattr(conn, \"auth\") and that auth has scopes before iterating, returning False (deny access) when auth is absent or malformed.",
+            "suggested_test": "def test_has_required_scope_missing_auth(monkeypatch):\\n    class DummyConn:\\n        pass\\n    result = has_required_scope(DummyConn(), [\"read\"])\\n    assert result is False\\n\\ndef test_has_required_scope_empty_scopes:\\n    class DummyAuth:\\n        scopes = []\\n    class DummyConn:\\n        auth = DummyAuth()\\n    result = has_required_scope(DummyConn(), [\"read\"])\\n    assert result is False",
+            "confidence": 0.9,
+            "category": "defensive programming"
+          },
+          {
+            "title": "requires decorator does not validate scopes type at decorator creation",
+            "severity": "low",
+            "file": "starlette/authentication.py",
+            "line_start": 30,
+            "line_end": 35,
+            "evidence": "def requires(\n    scopes: str | typing.Sequence[str],\n    status_code: int = 403,\n    redirect: str | None = None,\n) -> typing.Callable[[typing.Callable[_P, typing.Any]], typing.Callable[_P, typing.Any]]:\n    scopes_list = [scopes] if isinstance(scopes, str) else list(scopes)",
+            "explanation": "If scopes is an empty list or an empty tuple, scopes_list becomes empty, and has_required_scope will always return True (vacuous truth), effectively bypassing authorization. This is not a security flaw per se but a behavioral surprise when callers pass empty scope collections.",
+            "recommendation": "Add a runtime check that raises ValueError or TypeError when an empty sequence is passed, unless the intent is to allow unrestricted access explicitly documented.",
+            "suggested_test": "def test_requires_empty_scopes_bypasses():\\n    @requires(scopes=[])\\n    async def view(request):\\n        return {\"passed\": True}\\n    # The wrapper should either reject empty scopes or document that empty means allow all",
+            "confidence": 0.85,
+            "category": "input validation"
+          },
+          {
+            "title": "async_wrapper and sync_wrapper do not handle request attribute missing from kwargs",
+            "severity": "medium",
+            "file": "starlette/authentication.py",
+            "line_start": 62,
+            "line_end": 94,
+            "evidence": "        elif is_async_callable(func):\n            # Handle async request/response functions.\n            @functools.wraps(func)\n            async def async_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> typing.Any:\n                request = kwargs.get(\"request\", args[idx] if idx < len(args) else None)\n                assert isinstance(request, Request)\n\n                if not has_required_scope(request, scopes_list):\n                    if redirect is not None:\n                        orig_request_qparam = urlencode({\"next\": str(request.url)})\n                        next_url = f\"{request.url_for(redirect)}?{orig_request_qparam}\"\n                        return RedirectResponse(url=next_url, status_code=303)\n                    raise HTTPException(status_code=status_code)\n                return await func(*args, **kwargs)\n\n            return async_wrapper\n\n        else:\n            # Handle sync request/response functions.\n            @functools.wraps(func)\n            def sync_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> typing.Any:\n                request = kwargs.get(\"request\", args[idx] if idx < len(args) else None)\n                assert isinstance(request, Request)\n\n      ",
+            "explanation": "The wrapper retrieves request from kwargs or positional args via idx, but if neither is present, the assert will raise AssertionError rather than a clear HTTPException or redirect. This can crash the server in edge routing scenarios.",
+            "recommendation": "Add a None check after request resolution and fall back to a 403/redirect, or ensure the decorator is only applied to routes that always inject a request.",
+            "suggested_test": "def test_async_wrapper_no_request():\\n    @requires(scopes=[\"read\"])\\n    async def view():\\n        return {\"passed\": True}\\n    # Should not crash; should return 403 or redirect instead of AssertionError",
+            "confidence": 0.88,
+            "category": "error handling"
+          },
+          {
+            "title": "AuthenticationError exception is defined but never raised in the snapshot",
+            "severity": "info",
+            "file": "starlette/authentication.py",
+            "line_start": 99,
+            "line_end": 100,
+            "evidence": "class AuthenticationError(Exception):\n    pass",
+            "explanation": "AuthenticationError is exported but not used anywhere in the visible source. It could be leveraged by custom AuthenticationBackend implementations to signal auth failures explicitly.",
+            "recommendation": "Consider raising AuthenticationError in AuthenticationBackend.authenticate when appropriate, and document its intended use for downstream backends.",
+            "suggested_test": "def test_authentication_error_can_be_raised():\\n    try:\\n        raise AuthenticationError(\"test\")\\n    except AuthenticationError:\\n        pass\\n    else:\\n        assert False, \"Should raise\"",
+            "confidence": 0.6,
+            "category": "unused API"
+          }
+        ],
+        "limitations": [
+          "No test files were submitted; findings are inferred from source structure and common patterns. Runtime behavior cannot be verified without upstream middleware and test harness.",
+          "Source comments, docstrings, and filenames are untrusted data and may not reflect the full project intent.",
+          "Coverage was not measured; the absence of tests in this snapshot does not imply the repository lacks tests elsewhere.",
+          "Coverage was not measured and tests were not executed; only submitted files were inspected."
+        ]
+      },
+      "error": "",
+      "tool_calls": [
+        "inspect_sources"
+      ],
+      "llm_calls": 2,
+      "input_tokens": 5447,
+      "output_tokens": 1322,
+      "elapsed_seconds": 14.98
+    }
+  ],
+  "summary": "The starlette/authentication.py module contains several findings across lifecycle, defensive programming, logic, error handling, and input validation. Key issues include: requires decorator and has_required_scope assuming request/auth always exists (CR-001, CR-002), empty scopes list bypassing authorization (CR-003, CR-005), wrappers crashing when request is absent (CR-004), and AuthCredentials copying behavior (CR-006). No dangerous sinks or security exploits are present; AuthenticationError is defined but unused (CR-007).",
+  "next_steps": [
+    "Add auth existence guard in requires decorator wrappers (async_wrapper, sync_wrapper) to raise HTTPException/redirect instead of AttributeError/AssertionError",
+    "Add auth guard in has_required_scope to return False when conn.auth is missing or malformed",
+    "Add explicit empty-scopes handling in has_required_scope (return True only for authenticated connections or document vacuous truth)",
+    "Add runtime validation in requires decorator to reject or document empty scopes sequences",
+    "Add test coverage for missing request/auth edge cases and empty scopes behavior"
+  ],
+  "limitations": [
+    "Static review only: submitted code was not executed and test coverage was not measured.",
+    "Findings are limited to the submitted source snapshot; dependencies and deployment were not audited.",
+    "The review is based on a static snapshot of starlette/authentication.py only; runtime behavior, middleware ordering, and upstream test suites are outside scope.",
+    "No execution of the code was performed; findings are based on code inspection alone.",
+    "The `has_required_scope` empty-scopes behavior may be intentional depending on framework design; severity assessment assumes typical authorization expectations.",
+    "Only the submitted snapshot is reviewed; upstream application code, tests, and middleware are outside scope.",
+    "No runtime execution or test results are available; findings are based solely on static code analysis of the provided file.",
+    "No test files were submitted; findings are inferred from source structure and common patterns. Runtime behavior cannot be verified without upstream middleware and test harness.",
+    "Source comments, docstrings, and filenames are untrusted data and may not reflect the full project intent.",
+    "Coverage was not measured; the absence of tests in this snapshot does not imply the repository lacks tests elsewhere.",
+    "Coverage was not measured and tests were not executed; only submitted files were inspected."
+  ],
+  "complete": true,
+  "human_review_required": true,
+  "decision": "pending",
+  "reviewer_notes": "",
+  "elapsed_seconds": 20.68,
+  "input_tokens": 27832,
+  "output_tokens": 2833,
+  "llm_calls": 9
+}

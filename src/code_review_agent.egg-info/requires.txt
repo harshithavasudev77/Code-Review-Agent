@@ -1,0 +1,10 @@
+langgraph<2,>=1.0
+langchain-core<2,>=1.2.22
+openai<4,>=2
+pydantic<3,>=2.10
+python-dotenv<2,>=1.0
+streamlit<2,>=1.54
+striprtf<1,>=0.0.29
+
+[dev]
+pytest<10,>=8

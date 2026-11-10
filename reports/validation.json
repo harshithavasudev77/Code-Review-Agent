@@ -1,0 +1,20 @@
+{
+  "date_local": "2026-11-08",
+  "timezone": "America/Los_Angeles",
+  "automated_tests": {
+    "passed": 30,
+    "failed": 0,
+    "command": "python -m pytest -q"
+  },
+  "dependency_check": "pip check: no broken requirements",
+  "live_model": "nvidia/Nemotron-3_5-Lightning",
+  "real_sample_reviews_complete": "3/3",
+  "browser": {
+    "live_review_complete": true,
+    "json_download_validated": true,
+    "human_resume": "changes_requested",
+    "llm_calls_before_decision": 8,
+    "llm_calls_after_decision": 8
+  },
+  "review_scope": "Static review only. No submitted code or its tests were executed. No defect accuracy or runtime coverage percentage was measured."
+}

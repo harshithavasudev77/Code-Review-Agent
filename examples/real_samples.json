@@ -1,0 +1,80 @@
+[
+  {
+    "id": "flask-auth",
+    "name": "Flask authentication",
+    "repo": "pallets/flask",
+    "ref": "3.1.2",
+    "license": "BSD-3-Clause",
+    "files": [
+      {
+        "path": "examples/tutorial/flaskr/auth.py",
+        "local_path": "real/flask-auth/examples/tutorial/flaskr/auth.py",
+        "url": "https://raw.githubusercontent.com/pallets/flask/3.1.2/examples/tutorial/flaskr/auth.py",
+        "sha256": "a5ed5eaa05c6f6ee3e5bdb07b9e657a6e9320a115a68fd74b1cb4ac646680167",
+        "bytes": 3296
+      },
+      {
+        "path": "examples/tutorial/flaskr/db.py",
+        "local_path": "real/flask-auth/examples/tutorial/flaskr/db.py",
+        "url": "https://raw.githubusercontent.com/pallets/flask/3.1.2/examples/tutorial/flaskr/db.py",
+        "sha256": "700f9d0a455bf79c9bf6de4f2784f13b96256faea19c15ddee71fb7957e14c31",
+        "bytes": 1317
+      },
+      {
+        "path": "examples/tutorial/tests/test_auth.py",
+        "local_path": "real/flask-auth/examples/tutorial/tests/test_auth.py",
+        "url": "https://raw.githubusercontent.com/pallets/flask/3.1.2/examples/tutorial/tests/test_auth.py",
+        "sha256": "cbbe178c9980d8499561d8eae72f01b8abeead2fa10c9d5f71427da4af38a938",
+        "bytes": 2070
+      }
+    ],
+    "license_path": "LICENSE.txt",
+    "description": "Real Flask tutorial authentication and database code with its authentication tests.",
+    "repository_url": "https://github.com/pallets/flask"
+  },
+  {
+    "id": "fastapi-oauth",
+    "name": "FastAPI OAuth2 tutorial",
+    "repo": "fastapi/fastapi",
+    "ref": "0.115.0",
+    "license": "MIT",
+    "files": [
+      {
+        "path": "docs_src/security/tutorial001.py",
+        "local_path": "real/fastapi-oauth/docs_src/security/tutorial001.py",
+        "url": "https://raw.githubusercontent.com/fastapi/fastapi/0.115.0/docs_src/security/tutorial001.py",
+        "sha256": "2982d6ebeb11a3d83de3fb5735306151341b1a34cae8aaede5580ede9f733f5a",
+        "bytes": 269
+      },
+      {
+        "path": "tests/test_tutorial/test_security/test_tutorial001.py",
+        "local_path": "real/fastapi-oauth/tests/test_tutorial/test_security/test_tutorial001.py",
+        "url": "https://raw.githubusercontent.com/fastapi/fastapi/0.115.0/tests/test_tutorial/test_security/test_tutorial001.py",
+        "sha256": "7c53c55c5cdfd592426a08b030a40cc15e835041d871174d17a0abc8236366ba",
+        "bytes": 1905
+      }
+    ],
+    "license_path": "LICENSE",
+    "description": "Real OAuth2 introductory tutorial and submitted upstream tests; this is intentionally an introductory authentication surface.",
+    "repository_url": "https://github.com/fastapi/fastapi"
+  },
+  {
+    "id": "starlette-auth",
+    "name": "Starlette authentication",
+    "repo": "encode/starlette",
+    "ref": "0.41.3",
+    "license": "BSD-3-Clause",
+    "files": [
+      {
+        "path": "starlette/authentication.py",
+        "local_path": "real/starlette-auth/starlette/authentication.py",
+        "url": "https://raw.githubusercontent.com/encode/starlette/0.41.3/starlette/authentication.py",
+        "sha256": "f5d9727b2903321a3182623d845559dfcbaef0d97a93635989aa1aeb4ed9f217",
+        "bytes": 4948
+      }
+    ],
+    "license_path": "LICENSE.md",
+    "description": "Real framework authentication primitives. Upstream tests and middleware are outside this submitted snapshot.",
+    "repository_url": "https://github.com/encode/starlette"
+  }
+]

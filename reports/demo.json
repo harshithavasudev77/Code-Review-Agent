@@ -1,0 +1,449 @@
+{
+  "run_id": "fe2be3ad-2f4d-4210-a158-9086ee72e5ba",
+  "title": "Checkout service \u00b7 intentionally flawed demo",
+  "created_at": "2026-11-09T06:18:09.045370+00:00",
+  "model": "nvidia/Nemotron-3_5-Lightning",
+  "provider": "Nebius Token Factory",
+  "origin": "Synthetic teaching sample; not upstream open-source code",
+  "file_manifest": [
+    {
+      "path": "checkout.py",
+      "lines": 26,
+      "sha256": "c78de9cf8d1cd7596a1fb206327de2a01ec17b7dd18d4301aebdad2750b15e80"
+    },
+    {
+      "path": "test_checkout.py",
+      "lines": 7,
+      "sha256": "bc2c2c16b949dec7fc82edb9e1aa4aaee39c2e55a78fa32561b58180d7e9ef43"
+    }
+  ],
+  "findings": [
+    {
+      "title": "SQL injection in find_customer via f-string interpolation",
+      "severity": "critical",
+      "file": "checkout.py",
+      "line_start": 8,
+      "line_end": 9,
+      "evidence": "    query = f\"SELECT id, email FROM customers WHERE name = '{name}'\"\n    return connection.execute(query).fetchall()",
+      "explanation": "The function constructs a SQL query by directly interpolating the user-controlled `name` parameter into an f-string. An unauthenticated caller can pass arbitrary SQL, bypassing authentication or exfiltrating data from the customers table.",
+      "recommendation": "Use parameterized queries with placeholders: `query = \"SELECT id, email FROM customers WHERE name = ?\"` and pass `(name,)` as the second argument to `connection.execute()`.",
+      "suggested_test": "Call `find_customer` with a name like `'; DROP TABLE customers; --` and verify the database is not corrupted; then test a legitimate name returns correct rows.",
+      "confidence": 1.0,
+      "category": "Injection",
+      "id": "CR-001",
+      "agents": [
+        "bugs",
+        "security"
+      ]
+    },
+    {
+      "title": "Shell command injection in export_receipt",
+      "severity": "critical",
+      "file": "checkout.py",
+      "line_start": 22,
+      "line_end": 22,
+      "evidence": "    return subprocess.run(f\"cp receipt.txt {destination}\", shell=True, check=True)",
+      "explanation": "The `destination` argument is interpolated into a shell command with `shell=True`. An unauthenticated caller can inject arbitrary shell commands via metacharacters.",
+      "recommendation": "Pass the command as a list without shell=True, e.g. subprocess.run(['cp', 'receipt.txt', destination]), and validate/whitelist the destination path.",
+      "suggested_test": "Pass destination='receipt.txt; id' and verify the shell executes the injected command.",
+      "confidence": 1.0,
+      "category": "command_injection",
+      "id": "CR-002",
+      "agents": [
+        "security"
+      ]
+    },
+    {
+      "title": "Mutable default argument shared across calls in add_item",
+      "severity": "high",
+      "file": "checkout.py",
+      "line_start": 16,
+      "line_end": 18,
+      "evidence": "def add_item(item, cart=[]):\n    cart.append(item)\n    return cart",
+      "explanation": "The default value `cart=[]` is evaluated once at function definition time. Each call without an explicit `cart` argument mutates the same shared list, causing items to accumulate unexpectedly across calls.",
+      "recommendation": "Use `cart=None` as default and initialize a new list inside the function: `if cart is None: cart = []`.",
+      "suggested_test": "Call `add_item('a')` then `add_item('b')` without providing `cart` and assert the returned lists are independent (each contains only its own item).",
+      "confidence": 1.0,
+      "category": "Mutable default argument",
+      "id": "CR-003",
+      "agents": [
+        "bugs",
+        "security"
+      ]
+    },
+    {
+      "title": "Unsafe shell execution in export_receipt with string interpolation",
+      "severity": "high",
+      "file": "checkout.py",
+      "line_start": 21,
+      "line_end": 22,
+      "evidence": "def export_receipt(destination):\n    return subprocess.run(f\"cp receipt.txt {destination}\", shell=True, check=True)",
+      "explanation": "The function runs `cp receipt.txt {destination}` via `subprocess.run` with `shell=True`. The `destination` parameter is user-controlled and interpolated directly into the shell command, enabling command injection. An unauthenticated caller can append arbitrary shell commands.",
+      "recommendation": "Avoid `shell=True`. Pass the command as a list: `subprocess.run(['cp', 'receipt.txt', destination], check=True)`. If `shell=True` is required, rigorously validate and sanitize `destination` against a whitelist.",
+      "suggested_test": "Call `export_receipt` with `destination=\"/tmp/receipt.txt; rm -rf /\"` and verify no command injection occurs; with the fix, the command should safely copy the file.",
+      "confidence": 1.0,
+      "category": "Shell injection",
+      "id": "CR-004",
+      "agents": [
+        "bugs"
+      ]
+    },
+    {
+      "title": "Path traversal risk in open_store",
+      "severity": "high",
+      "file": "checkout.py",
+      "line_start": 25,
+      "line_end": 26,
+      "evidence": "def open_store(path):\n    return sqlite3.connect(path)",
+      "explanation": "The `path` argument is passed directly to `sqlite3.connect` without validation. An unauthenticated caller can supply a path traversal string (e.g., `../../etc/passwd`) to access or create a database outside the intended directory.",
+      "recommendation": "Validate that the resolved path is within an allowed base directory (e.g., using os.path.realpath and a prefix check) before connecting.",
+      "suggested_test": "Pass path='../../../etc/passwd' and verify the function either rejects the path or only connects to allowed locations.",
+      "confidence": 0.9,
+      "category": "path_traversal",
+      "id": "CR-005",
+      "agents": [
+        "security"
+      ]
+    },
+    {
+      "title": "SQL injection in find_customer",
+      "severity": "medium",
+      "file": "checkout.py",
+      "line_start": 7,
+      "line_end": 9,
+      "evidence": "def find_customer(name, connection):\n    query = f\"SELECT id, email FROM customers WHERE name = '{name}'\"\n    return connection.execute(query).fetchall()",
+      "explanation": "The name parameter is interpolated directly into the SQL string. An unauthenticated caller can supply arbitrary request values, enabling SQL injection that can read or modify the database.",
+      "recommendation": "Use a parameterized query: query = 'SELECT id, email FROM customers WHERE name = ?' with connection.execute(query, (name,)).",
+      "suggested_test": "def test_find_customer_sql_injection():    conn = sqlite3.connect(':memory:')    conn.execute('CREATE TABLE customers (id INTEGER, email TEXT)')    conn.execute('INSERT INTO customers VALUES (1, 'user@example.com')')    result = find_customer(''; DROP TABLE customers; --', conn)    # With parameterized queries the injected SQL is treated as data",
+      "confidence": 1.0,
+      "category": "injection",
+      "id": "CR-006",
+      "agents": [
+        "tests"
+      ]
+    },
+    {
+      "title": "Mutable default argument in add_item",
+      "severity": "medium",
+      "file": "checkout.py",
+      "line_start": 16,
+      "line_end": 18,
+      "evidence": "def add_item(item, cart=[]):\n    cart.append(item)\n    return cart",
+      "explanation": "The default argument cart=[] is a mutable list shared across all calls that do not supply a cart. Repeated calls without a cart argument accumulate items unexpectedly.",
+      "recommendation": "Replace the mutable default with None and initialize a new list inside the function body.",
+      "suggested_test": "def test_add_item_no_arg_isolated():    assert add_item('a') == ['a']    assert add_item('b') == ['b']    assert add_item('c') == ['c']",
+      "confidence": 0.95,
+      "category": "mutable-default",
+      "id": "CR-007",
+      "agents": [
+        "tests"
+      ]
+    },
+    {
+      "title": "Shell injection in export_receipt",
+      "severity": "medium",
+      "file": "checkout.py",
+      "line_start": 21,
+      "line_end": 22,
+      "evidence": "def export_receipt(destination):\n    return subprocess.run(f\"cp receipt.txt {destination}\", shell=True, check=True)",
+      "explanation": "The destination argument is interpolated into a shell command with shell=True. An unauthenticated caller can inject arbitrary shell commands via the destination path.",
+      "recommendation": "Avoid shell=True and pass arguments as a list: subprocess.run(['cp', 'receipt.txt', destination], check=True). If shell is required, validate and sanitize destination strictly.",
+      "suggested_test": "def test_export_receipt_shell_injection():    import tempfile, os    dest = '/tmp/evil; rm -rf /'    # The test should verify that passing a destructive path either fails safely or is rejected by validation before reaching subprocess.",
+      "confidence": 0.9,
+      "category": "shell-injection",
+      "id": "CR-008",
+      "agents": [
+        "tests"
+      ]
+    },
+    {
+      "title": "open_store exposes database path without validation",
+      "severity": "medium",
+      "file": "checkout.py",
+      "line_start": 25,
+      "line_end": 26,
+      "evidence": "def open_store(path):\n    return sqlite3.connect(path)",
+      "explanation": "The function returns `sqlite3.connect(path)` with no validation of `path`. An caller can pass an arbitrary path, potentially overwriting or reading files outside intended directories (e.g., `open_store('/etc/passwd')` or a maliciously crafted SQLite file).",
+      "recommendation": "Validate that `path` resides within an allowed directory (e.g., using `os.path.commonpath` or checking for path traversal patterns) before connecting. Consider restricting to a dedicated data directory.",
+      "suggested_test": "Attempt `open_store` with a path outside the expected scope and confirm it either raises an error or is rejected by validation.",
+      "confidence": 0.9,
+      "category": "Path traversal",
+      "id": "CR-009",
+      "agents": [
+        "bugs"
+      ]
+    },
+    {
+      "title": "Test covers only average_order_value",
+      "severity": "medium",
+      "file": "test_checkout.py",
+      "line_start": 6,
+      "line_end": 7,
+      "evidence": "def test_average_order_value():\n    assert average_order_value([10, 20]) == 15",
+      "explanation": "The test inventory shows only one test exists. The other three production functions (find_customer, add_item, export_receipt) have no unit tests. Adding tests for the identified injection and mutable-default issues improves regression coverage.",
+      "recommendation": "Add unit tests for find_customer (parameterized query behavior), add_item (mutable default fix), and export_receipt (shell safety).",
+      "suggested_test": "def test_add_item_mutable_default_fixed():    assert add_item('a') == ['a']    assert add_item('b') == ['b']",
+      "confidence": 0.85,
+      "category": "missing-test",
+      "id": "CR-010",
+      "agents": [
+        "tests"
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "role": "bugs",
+      "status": "completed",
+      "review": {
+        "summary": "Review of intentionally flawed checkout demo with multiple anti-patterns and bugs.",
+        "findings": [
+          {
+            "title": "SQL injection in find_customer via f-string interpolation",
+            "severity": "critical",
+            "file": "checkout.py",
+            "line_start": 8,
+            "line_end": 9,
+            "evidence": "    query = f\"SELECT id, email FROM customers WHERE name = '{name}'\"\n    return connection.execute(query).fetchall()",
+            "explanation": "The function constructs a SQL query by directly interpolating the user-controlled `name` parameter into an f-string. An unauthenticated caller can pass arbitrary SQL, bypassing authentication or exfiltrating data from the customers table.",
+            "recommendation": "Use parameterized queries with placeholders: `query = \"SELECT id, email FROM customers WHERE name = ?\"` and pass `(name,)` as the second argument to `connection.execute()`.",
+            "suggested_test": "Call `find_customer` with a name like `'; DROP TABLE customers; --` and verify the database is not corrupted; then test a legitimate name returns correct rows.",
+            "confidence": 1.0,
+            "category": "Injection"
+          },
+          {
+            "title": "Mutable default argument shared across calls in add_item",
+            "severity": "high",
+            "file": "checkout.py",
+            "line_start": 16,
+            "line_end": 18,
+            "evidence": "def add_item(item, cart=[]):\n    cart.append(item)\n    return cart",
+            "explanation": "The default value `cart=[]` is evaluated once at function definition time. Each call without an explicit `cart` argument mutates the same shared list, causing items to accumulate unexpectedly across calls.",
+            "recommendation": "Use `cart=None` as default and initialize a new list inside the function: `if cart is None: cart = []`.",
+            "suggested_test": "Call `add_item('a')` then `add_item('b')` without providing `cart` and assert the returned lists are independent (each contains only its own item).",
+            "confidence": 1.0,
+            "category": "Mutable default argument"
+          },
+          {
+            "title": "Unsafe shell execution in export_receipt with string interpolation",
+            "severity": "high",
+            "file": "checkout.py",
+            "line_start": 21,
+            "line_end": 22,
+            "evidence": "def export_receipt(destination):\n    return subprocess.run(f\"cp receipt.txt {destination}\", shell=True, check=True)",
+            "explanation": "The function runs `cp receipt.txt {destination}` via `subprocess.run` with `shell=True`. The `destination` parameter is user-controlled and interpolated directly into the shell command, enabling command injection. An unauthenticated caller can append arbitrary shell commands.",
+            "recommendation": "Avoid `shell=True`. Pass the command as a list: `subprocess.run(['cp', 'receipt.txt', destination], check=True)`. If `shell=True` is required, rigorously validate and sanitize `destination` against a whitelist.",
+            "suggested_test": "Call `export_receipt` with `destination=\"/tmp/receipt.txt; rm -rf /\"` and verify no command injection occurs; with the fix, the command should safely copy the file.",
+            "confidence": 1.0,
+            "category": "Shell injection"
+          },
+          {
+            "title": "open_store exposes database path without validation",
+            "severity": "medium",
+            "file": "checkout.py",
+            "line_start": 25,
+            "line_end": 26,
+            "evidence": "def open_store(path):\n    return sqlite3.connect(path)",
+            "explanation": "The function returns `sqlite3.connect(path)` with no validation of `path`. An caller can pass an arbitrary path, potentially overwriting or reading files outside intended directories (e.g., `open_store('/etc/passwd')` or a maliciously crafted SQLite file).",
+            "recommendation": "Validate that `path` resides within an allowed directory (e.g., using `os.path.commonpath` or checking for path traversal patterns) before connecting. Consider restricting to a dedicated data directory.",
+            "suggested_test": "Attempt `open_store` with a path outside the expected scope and confirm it either raises an error or is rejected by validation.",
+            "confidence": 0.9,
+            "category": "Path traversal"
+          }
+        ],
+        "limitations": [
+          "Source is an intentionally flawed teaching fixture; findings reflect real patterns but the code should never run in production.",
+          "No execution environment was available; findings are based on static code analysis only."
+        ]
+      },
+      "error": "",
+      "tool_calls": [
+        "inspect_sources"
+      ],
+      "llm_calls": 2,
+      "input_tokens": 3847,
+      "output_tokens": 888,
+      "elapsed_seconds": 12.93
+    },
+    {
+      "role": "security",
+      "status": "completed",
+      "review": {
+        "summary": "Review of intentionally flawed checkout demo with untrusted caller input.",
+        "findings": [
+          {
+            "title": "SQL injection in find_customer",
+            "severity": "critical",
+            "file": "checkout.py",
+            "line_start": 8,
+            "line_end": 9,
+            "evidence": "    query = f\"SELECT id, email FROM customers WHERE name = '{name}'\"\n    return connection.execute(query).fetchall()",
+            "explanation": "The `name` parameter is interpolated directly into an SQL query without parameterization. An unauthenticated caller can supply arbitrary SQL, enabling data exfiltration or modification.",
+            "recommendation": "Use a parameterized query: cursor.execute('SELECT id, email FROM customers WHERE name = ?', (name,))",
+            "suggested_test": "Inject \"' OR '1'='1\" as name and verify the query returns all rows or causes an error.",
+            "confidence": 1.0,
+            "category": "injection"
+          },
+          {
+            "title": "Shell command injection in export_receipt",
+            "severity": "critical",
+            "file": "checkout.py",
+            "line_start": 22,
+            "line_end": 22,
+            "evidence": "    return subprocess.run(f\"cp receipt.txt {destination}\", shell=True, check=True)",
+            "explanation": "The `destination` argument is interpolated into a shell command with `shell=True`. An unauthenticated caller can inject arbitrary shell commands via metacharacters.",
+            "recommendation": "Pass the command as a list without shell=True, e.g. subprocess.run(['cp', 'receipt.txt', destination]), and validate/whitelist the destination path.",
+            "suggested_test": "Pass destination='receipt.txt; id' and verify the shell executes the injected command.",
+            "confidence": 1.0,
+            "category": "command_injection"
+          },
+          {
+            "title": "Mutable default argument in add_item",
+            "severity": "medium",
+            "file": "checkout.py",
+            "line_start": 16,
+            "line_end": 18,
+            "evidence": "def add_item(item, cart=[]):\n    cart.append(item)\n    return cart",
+            "explanation": "The default `cart=[]` is created once at function definition time and shared across calls, leading to unexpected accumulation of items across independent calls.",
+            "recommendation": "Use `None` as default and initialize a new list inside the function: `def add_item(item, cart=None): cart = cart or []`",
+            "suggested_test": "Call add_item('a') twice without providing cart and assert each returns a singleton list.",
+            "confidence": 0.95,
+            "category": "mutable_default"
+          },
+          {
+            "title": "Path traversal risk in open_store",
+            "severity": "high",
+            "file": "checkout.py",
+            "line_start": 25,
+            "line_end": 26,
+            "evidence": "def open_store(path):\n    return sqlite3.connect(path)",
+            "explanation": "The `path` argument is passed directly to `sqlite3.connect` without validation. An unauthenticated caller can supply a path traversal string (e.g., `../../etc/passwd`) to access or create a database outside the intended directory.",
+            "recommendation": "Validate that the resolved path is within an allowed base directory (e.g., using os.path.realpath and a prefix check) before connecting.",
+            "suggested_test": "Pass path='../../../etc/passwd' and verify the function either rejects the path or only connects to allowed locations.",
+            "confidence": 0.9,
+            "category": "path_traversal"
+          }
+        ],
+        "limitations": [
+          "Source is an intentionally flawed teaching fixture; findings reflect real code patterns but may not represent production risk magnitude.",
+          "No runtime execution was performed; static analysis only.",
+          "Test suggestions are based on injecting known payloads; actual exploitability depends on runtime context.",
+          "Mutable default and path traversal findings rely on inspection of parameter flow; no dynamic validation was possible."
+        ]
+      },
+      "error": "",
+      "tool_calls": [
+        "inspect_sources"
+      ],
+      "llm_calls": 2,
+      "input_tokens": 3839,
+      "output_tokens": 921,
+      "elapsed_seconds": 12.79
+    },
+    {
+      "role": "tests",
+      "status": "completed",
+      "review": {
+        "summary": "Review of the intentionally flawed checkout demo. Two production code issues and one test improvement identified. Coverage was not measured.",
+        "findings": [
+          {
+            "title": "Mutable default argument in add_item",
+            "severity": "medium",
+            "file": "checkout.py",
+            "line_start": 16,
+            "line_end": 18,
+            "evidence": "def add_item(item, cart=[]):\n    cart.append(item)\n    return cart",
+            "explanation": "The default argument cart=[] is a mutable list shared across all calls that do not supply a cart. Repeated calls without a cart argument accumulate items unexpectedly.",
+            "recommendation": "Replace the mutable default with None and initialize a new list inside the function body.",
+            "suggested_test": "def test_add_item_no_arg_isolated():    assert add_item('a') == ['a']    assert add_item('b') == ['b']    assert add_item('c') == ['c']",
+            "confidence": 0.95,
+            "category": "mutable-default"
+          },
+          {
+            "title": "SQL injection in find_customer",
+            "severity": "critical",
+            "file": "checkout.py",
+            "line_start": 7,
+            "line_end": 9,
+            "evidence": "def find_customer(name, connection):\n    query = f\"SELECT id, email FROM customers WHERE name = '{name}'\"\n    return connection.execute(query).fetchall()",
+            "explanation": "The name parameter is interpolated directly into the SQL string. An unauthenticated caller can supply arbitrary request values, enabling SQL injection that can read or modify the database.",
+            "recommendation": "Use a parameterized query: query = 'SELECT id, email FROM customers WHERE name = ?' with connection.execute(query, (name,)).",
+            "suggested_test": "def test_find_customer_sql_injection():    conn = sqlite3.connect(':memory:')    conn.execute('CREATE TABLE customers (id INTEGER, email TEXT)')    conn.execute('INSERT INTO customers VALUES (1, 'user@example.com')')    result = find_customer(''; DROP TABLE customers; --', conn)    # With parameterized queries the injected SQL is treated as data",
+            "confidence": 1.0,
+            "category": "injection"
+          },
+          {
+            "title": "Shell injection in export_receipt",
+            "severity": "high",
+            "file": "checkout.py",
+            "line_start": 21,
+            "line_end": 22,
+            "evidence": "def export_receipt(destination):\n    return subprocess.run(f\"cp receipt.txt {destination}\", shell=True, check=True)",
+            "explanation": "The destination argument is interpolated into a shell command with shell=True. An unauthenticated caller can inject arbitrary shell commands via the destination path.",
+            "recommendation": "Avoid shell=True and pass arguments as a list: subprocess.run(['cp', 'receipt.txt', destination], check=True). If shell is required, validate and sanitize destination strictly.",
+            "suggested_test": "def test_export_receipt_shell_injection():    import tempfile, os    dest = '/tmp/evil; rm -rf /'    # The test should verify that passing a destructive path either fails safely or is rejected by validation before reaching subprocess.",
+            "confidence": 0.9,
+            "category": "shell-injection"
+          },
+          {
+            "title": "Test covers only average_order_value",
+            "severity": "medium",
+            "file": "test_checkout.py",
+            "line_start": 6,
+            "line_end": 7,
+            "evidence": "def test_average_order_value():\n    assert average_order_value([10, 20]) == 15",
+            "explanation": "The test inventory shows only one test exists. The other three production functions (find_customer, add_item, export_receipt) have no unit tests. Adding tests for the identified injection and mutable-default issues improves regression coverage.",
+            "recommendation": "Add unit tests for find_customer (parameterized query behavior), add_item (mutable default fix), and export_receipt (shell safety).",
+            "suggested_test": "def test_add_item_mutable_default_fixed():    assert add_item('a') == ['a']    assert add_item('b') == ['b']",
+            "confidence": 0.85,
+            "category": "missing-test"
+          }
+        ],
+        "limitations": [
+          "Source files are a synthetic teaching fixture; behavior may not reflect production-grade code.",
+          "No tests were actually executed; confidence values are based on code inspection alone.",
+          "The mutable-default and injection risks assume the functions are called as documented with unauthenticated request values.",
+          "Coverage was not measured and tests were not executed; only submitted files were inspected."
+        ]
+      },
+      "error": "",
+      "tool_calls": [
+        "inspect_sources"
+      ],
+      "llm_calls": 3,
+      "input_tokens": 7302,
+      "output_tokens": 2007,
+      "elapsed_seconds": 11.34
+    }
+  ],
+  "summary": "The codebase contains multiple validated security and correctness issues in checkout.py. Critical injection flaws affect find_customer (SQL injection via f-string) and export_receipt (shell command injection via f-string with shell=True). High-severity bugs include a mutable default argument in add_item that shares state across calls, and a path traversal risk in open_store where unvalidated paths are passed to sqlite3.connect. Medium-severity findings duplicate some of these issues with lower confidence scores. No specialist failures were reported, but the source scope is limited to the provided findings and specialist summaries.",
+  "next_steps": [
+    "Replace f-string SQL interpolation in find_customer with parameterized queries (CR-001/CR-006).",
+    "Rewrite export_receipt to avoid shell=True and interpolated commands (CR-002/CR-004).",
+    "Fix add_item mutable default by using None and initializing a new list (CR-003/CR-007).",
+    "Add path validation in open_store before connecting to sqlite3 (CR-005/CR-009).",
+    "Add unit tests for find_customer, add_item, and export_receipt to prevent regression (CR-010)."
+  ],
+  "limitations": [
+    "Static review only: submitted code was not executed and test coverage was not measured.",
+    "Findings are limited to the submitted source snapshot; dependencies and deployment were not audited.",
+    "Source is an intentionally flawed teaching fixture; findings reflect real patterns but the code should never run in production.",
+    "No execution environment was available; findings are based on static code analysis only.",
+    "Source is an intentionally flawed teaching fixture; findings reflect real code patterns but may not represent production risk magnitude.",
+    "No runtime execution was performed; static analysis only.",
+    "Test suggestions are based on injecting known payloads; actual exploitability depends on runtime context.",
+    "Mutable default and path traversal findings rely on inspection of parameter flow; no dynamic validation was possible.",
+    "Source files are a synthetic teaching fixture; behavior may not reflect production-grade code.",
+    "No tests were actually executed; confidence values are based on code inspection alone.",
+    "The mutable-default and injection risks assume the functions are called as documented with unauthenticated request values.",
+    "Coverage was not measured and tests were not executed; only submitted files were inspected."
+  ],
+  "complete": true,
+  "human_review_required": true,
+  "decision": "pending",
+  "reviewer_notes": "",
+  "elapsed_seconds": 14.75,
+  "input_tokens": 17698,
+  "output_tokens": 4116,
+  "llm_calls": 8
+}

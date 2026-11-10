@@ -1,0 +1,65 @@
+{
+  "model": "nvidia/Nemotron-3_5-Lightning",
+  "samples_reviewed": 3,
+  "complete_reviews": 3,
+  "results": [
+    {
+      "sample": "flask-auth",
+      "origin": "https://github.com/pallets/flask @ 3.1.2",
+      "complete": true,
+      "decision": "pending",
+      "findings": 10,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "medium": 7,
+        "low": 3,
+        "info": 0
+      },
+      "agents_completed": 3,
+      "elapsed_seconds": 12.93,
+      "llm_calls": 13,
+      "input_tokens": 56341,
+      "output_tokens": 4034
+    },
+    {
+      "sample": "fastapi-oauth",
+      "origin": "https://github.com/fastapi/fastapi @ 0.115.0",
+      "complete": true,
+      "decision": "pending",
+      "findings": 11,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "medium": 4,
+        "low": 5,
+        "info": 2
+      },
+      "agents_completed": 3,
+      "elapsed_seconds": 20.16,
+      "llm_calls": 10,
+      "input_tokens": 27932,
+      "output_tokens": 4661
+    },
+    {
+      "sample": "starlette-auth",
+      "origin": "https://github.com/encode/starlette @ 0.41.3",
+      "complete": true,
+      "decision": "pending",
+      "findings": 7,
+      "severity_counts": {
+        "critical": 0,
+        "high": 1,
+        "medium": 3,
+        "low": 2,
+        "info": 1
+      },
+      "agents_completed": 3,
+      "elapsed_seconds": 20.68,
+      "llm_calls": 9,
+      "input_tokens": 27832,
+      "output_tokens": 2833
+    }
+  ],
+  "evaluation_scope": "Live end-to-end completion and citation validation, not ground-truth defect accuracy. No source tests were executed."
+}
